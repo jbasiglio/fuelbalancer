@@ -11,15 +11,52 @@ var urlParse = require('url');
 var auth = require('./auth.js');
 //var os = require('os');
 
-var proxies = [];
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+	
+var _proxy = httpProxy.createProxy();
 
-function nextProxy() {
+var _proxies = [];
+var _proxiesSSL = [];
+
+
+function nextProxy(ssl) {
+	var proxies = ssl ? _proxiesSSL : _proxies;
 	if(proxies.length > 0){
 		var target = proxies.shift();
 		proxies.push(target);
-		return target.proxy;
+		return target;
 	}
 	return null;
+}
+
+function addProxy(host,port,id,ssl){
+	ssl = (ssl === "true");
+	var proxies = ssl ? _proxiesSSL : _proxies;
+	/*var proxy = new httpProxy.createProxyServer({
+		target:{host:host,port:port}
+	});*/
+	proxies.push({'id':id,'host':host,'port':port});
+}
+
+function delProxy(id){
+	var ids = [];
+	for(var key in _proxies){
+		if(_proxies[key].id === id){
+			ids.push(key);
+		}
+	}
+	ids.forEach(function(key){
+		delete _proxies[key];
+	});
+	ids = [];
+	for(var key in _proxiesSSL){
+		if(_proxiesSSL[key].id === id){
+			ids.push(key);
+		}
+	}
+	ids.forEach(function(key){
+		delete _proxiesSSL[key];
+	});
 }
 
 var _httpHandle = function(req, res) {
@@ -32,7 +69,14 @@ var _httpHandle = function(req, res) {
 		res.end();
 		return;
 	}
-	nextProxy().web(req, res);
+	var target = nextProxy();
+	if(!target){
+		console.log("No server available");
+		//TODO return error
+		return;
+	}
+	_proxy.web(req, res,{target:'http://'+target.host+':'+target.port+'/'});
+	console.log('Forward HTTP to server '+target.id);
 };
 
 var _httpsHandle = function(req, res) {
@@ -45,15 +89,39 @@ var _httpsHandle = function(req, res) {
 		res.end();
 		return;
 	}
-	var proxy = nextProxy();
-	proxy.web(req, res);
-	console.log('Forward HTTP to '+proxy.id);
+	var target = nextProxy(true);
+	if(!target){
+		console.log("No server available");
+		//TODO return error
+		return;
+	}
+	_proxy.web(req, res,{target:'https://'+target.host+':'+target.port+'/'});
+	console.log('Forward HTTPS to server '+target.id);
 };
 
 var _wsHandle = function(req, socket, head) {
-	var proxy = nextProxy();
-	proxy.ws(req, socket, head);
-	console.log('Forward WS to '+proxy.id);
+	var target = nextProxy();
+	if(!target){
+		console.log("No server available");
+		//TODO return error
+		socket.destroy();
+		return;
+	}
+	_proxy.ws(req, socket, head,{target:'ws://'+target.host+':'+target.port+'/'});
+	console.log('Forward WS to server '+target.id);
+};
+
+var _wssHandle = function(req, socket, head) {
+	var target = nextProxy(true);
+	if(!target){
+		console.log("No server available");
+		//TODO return error
+		socket.destroy();
+		return;
+	}
+	//target.proxy.ws(req, socket, head);
+	_proxy.ws(req, socket, head,{target:'wss://'+target.host+':'+target.port+'/'});
+	console.log('Forward WSS to server '+target.id);
 };
 
 config.hosts.forEach(function(host){
@@ -64,10 +132,11 @@ config.hosts.forEach(function(host){
 			cert : fs.readFileSync(host.cert)
 		};
 		httpServer = https.createServer(options,_httpsHandle);
+		httpServer.on('upgrade', _wssHandle);
 	}else{
 		httpServer = http.createServer(_httpHandle);
+		httpServer.on('upgrade', _wsHandle);
 	}
-	httpServer.on('upgrade', _wsHandle);
 	httpServer.listen(host.port, host.host);
 	console.log('Listening for HTTP'+(host.ssl?'S':'')+'/WS'+(host.ssl?'S':'')+' at IP ' + host.host + ' on port ' + host.port);
 });
@@ -86,7 +155,6 @@ var wsServer = new WebSocketServer({
 	server : managerServer
 });
 wsServer.on('connection', function(ws) {
-	console.log("Manager connection open");
 	var url = urlParse.parse(ws.upgradeReq.url,true);
 	if(auth.verifyURL(url)){
 		var obj = {"error":"Auth failed"};
@@ -94,12 +162,10 @@ wsServer.on('connection', function(ws) {
 		ws.close();
 	}
 	ws.id = url.query.id;
+	console.log("Manager connection open with server "+ws.id);
 	var hosts = url.query.hosts;
 	hosts.split(',').forEach(function(host){
-		var proxy = new httpProxy.createProxyServer({
-			target:{host:host.split(':')[1],port:host.split(':')[2]}
-		});
-		proxies.push({'id':ws.id,'proxy':proxy});
+		addProxy(host.split(':')[1],host.split(':')[2],ws.id,host.split(':')[0]);
 	});
 	ws.on('message', function(msg) {
 		console.log("Manager message: "+msg);
@@ -108,16 +174,8 @@ wsServer.on('connection', function(ws) {
 		console.log("Manager error: "+message);
 	});
 	ws.on('close', function(code, message) {
-		console.log("Manager connection lost");
-		var ids = [];
-		for(var key in proxies){
-			if(proxies[key].id === ws.id){
-				ids.push(key);
-			}
-		}
-		ids.forEach(function(id){
-			delete proxies[id];
-		});
+		console.log("Manager connection lost with server "+ws.id);
+		delProxy(ws.id);
 	});
 });
 managerServer.listen(config.manager.port, config.manager.host);
