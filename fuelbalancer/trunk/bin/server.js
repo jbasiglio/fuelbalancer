@@ -32,31 +32,20 @@ function nextProxy(ssl) {
 function addProxy(host,port,id,ssl){
 	ssl = (ssl === "true");
 	var proxies = ssl ? _proxiesSSL : _proxies;
-	/*var proxy = new httpProxy.createProxyServer({
-		target:{host:host,port:port}
-	});*/
 	proxies.push({'id':id,'host':host,'port':port});
 }
 
 function delProxy(id){
-	var ids = [];
 	for(var key in _proxies){
 		if(_proxies[key].id === id){
-			ids.push(key);
+			delete _proxies[key];
 		}
 	}
-	ids.forEach(function(key){
-		delete _proxies[key];
-	});
-	ids = [];
 	for(var key in _proxiesSSL){
 		if(_proxiesSSL[key].id === id){
-			ids.push(key);
+			delete _proxiesSSL[key];
 		}
 	}
-	ids.forEach(function(key){
-		delete _proxiesSSL[key];
-	});
 }
 
 var _httpHandle = function(req, res) {
