@@ -13,9 +13,9 @@
   "author": {
     "name": "Joris Basiglio",
     "email": "joris.basiglio@wonderfuel.io",
-    "url": "http://wonderfuel.io/"
+    "url": "https://wonderfuel.io/"
   },
-  "homepage": "http://wonderfuel.io/#/fuelbalancer/overview",
+  "homepage": "https://www.wonderfuel.io/#/fuelbalancer/overview",
   "repository": {
     "type": "git",
     "url": "https://github.com/unnamed38/fuelbalancer.git"
